@@ -35,9 +35,10 @@ app.get('/api/findings/:auditId', (req, res) => {
     const findingsWithDiffs = findings.map(finding => {
       const fix = db.prepare('SELECT * FROM fix_tracker WHERE finding_id = ?').get(finding.id);
       if (fix) {
-        finding.after_screenshot_path = fix.after_screenshot_path;
-        finding.diff_image_path = fix.diff_image_path;
+        finding.after_screenshot_path = fix.after_screenshot;
+        finding.diff_image_path = fix.diff_image;
         finding.diff_percentage = fix.diff_percentage;
+        finding.diff_pixels = fix.diff_pixels;
       }
       return finding;
     });
