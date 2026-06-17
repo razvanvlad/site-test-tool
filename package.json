@@ -13,6 +13,7 @@
   "type": "module",
   "dependencies": {
     "@axe-core/playwright": "^4.11.3",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.11.1",
     "chrome-launcher": "^1.2.1",
     "express": "^5.2.1",
