@@ -16,7 +16,7 @@
 
 ---
 
-## Phase 1 — CLI Engine
+## Phase 1: CLI Engine
 
 **Goal:** A working `node audit.js <url>` CLI that runs all 5 audit engines (Playwright capture, Lighthouse, axe-core, linkinator) and writes normalized findings to SQLite + a JSON report file.
 
@@ -53,7 +53,7 @@
 
 ---
 
-## Phase 2 — Dashboard + Fix Tracker
+## Phase 2: Dashboard + Fix Tracker
 
 **Goal:** An Express web dashboard where you can triage findings from any audit run — filter by severity/category, mark false positives, add notes, and view before/after/diff screenshots for fixed issues.
 
@@ -84,7 +84,7 @@
 
 ---
 
-## Phase 3 — MCP Server
+## Phase 3: MCP Server
 
 **Goal:** Wrap the audit engine as an MCP stdio server so Antigravity can call `run_audit()`, `get_findings()`, and `compare_screenshots()` as agent tools. Register in both MCP config files.
 
@@ -116,7 +116,7 @@
 
 ---
 
-## Phase 4 — Agent Skill + Polish
+## Phase 4: Agent Skill + Polish
 
 **Goal:** Package the audit workflow as a SKILL.md so any agent session knows how to run audits, report findings, and verify fixes without being explicitly instructed. Final polish pass on CLI + dashboard.
 
