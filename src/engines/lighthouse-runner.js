@@ -14,11 +14,14 @@ export async function runLighthouse(url) {
     
     const runnerResult = await lighthouse(url, options);
     
-    await chrome.kill();
+    try {
+      await chrome.kill();
+    } catch (e) {}
+    
     return { lhr: runnerResult.lhr };
   } catch (error) {
     if (chrome) {
-      await chrome.kill();
+      try { await chrome.kill(); } catch (e) {}
     }
     console.error('Lighthouse execution failed:', error);
     return { error: error.message };
