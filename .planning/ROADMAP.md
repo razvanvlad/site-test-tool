@@ -10,9 +10,10 @@
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
 | 1 | CLI Engine | 3/3 | Complete    | 2026-06-17 |
-| 2 | Dashboard + Fix Tracker | Triage client findings end-to-end in browser UI | DASH-01–04, DIFF-01–02 | List, filter, update finding status, see screenshot diff |
-| 3 | MCP Server | Antigravity can call `run_audit()` and get findings | MCP-01–05 | MCP Inspector passes, Antigravity triggers audit via chat |
-| 4 | Agent Skill + Polish | Agent runs audit workflow from natural language | SKILL-01–03 | Fresh session: "QA this site" runs audit and reports clearly |
+| 2 | Dashboard + Fix Tracker | 3/3 | Complete    | 2026-06-17 |
+| 3 | MCP Server | 2/2 | Complete   | 2026-06-17 |
+| 4 | Agent Skill + Polish | 2/2 | Complete   | 2026-06-17 |
+| 5 | Project & Multi-Page Engine | 0/3 | Pending | TBD |
 
 ---
 
@@ -66,7 +67,7 @@
 - DIFF-02: Outputs diff_pixels, diff_percentage, diff image path
 
 **Plans:**
-1. **Express API backend** — `server.js` + REST endpoints (GET audits, GET findings, PATCH finding, POST fix)
+3/3 plans complete
 2. **Dashboard HTML/CSS** — `public/index.html` with audit list and findings table with filters
 3. **Finding detail + triage panel** — inline edit for status/notes/false-positive flag
 4. **Before/after/diff UI** — side-by-side screenshot viewer using stored paths
@@ -96,7 +97,7 @@
 - MCP-05: Entry added to `~/.gemini/config/mcp_config.json` and `antigravity-ide/mcp_config.json`
 
 **Plans:**
-1. **MCP server scaffold** — `mcp/index.ts` (or `.js`) with `@modelcontextprotocol/sdk`, StdioServerTransport
+2/2 plans complete
 2. **Tool implementations** — wire `run_audit`, `get_findings`, `compare_screenshots` to existing engine/db code
 3. **Build + Inspector validation** — `npm run build`, test with `npx @modelcontextprotocol/inspector`
 4. **Registration** — add `site-audit` entry to both MCP config files, reload Antigravity, approve tool
@@ -126,7 +127,7 @@
 - SKILL-03: Skill guidelines: never invent findings, flag 403/999 as "needs manual check"
 
 **Plans:**
-1. **SKILL.md** — write skill at global skills path with YAML frontmatter, 6-step instructions, guidelines
+2/2 plans complete
 2. **Polish pass** — clean up CLI output, improve error messages, add `--help` flag
 3. **Project README.md** — setup guide, dependency install, usage examples, MCP config snippet
 4. **`.agents/skills/` copy** — add project-local skill copy at `<project>/.agents/skills/site-audit-reporter/`
@@ -138,6 +139,32 @@
 
 **UAT:**
 - Start new Antigravity session → type "QA klap.ro" → agent self-selects skill → runs audit → reports clearly → verifies one fix
+
+---
+
+## Phase 5: Project & Multi-Page Engine
+
+**Goal:** Transform the tool from a single-URL script to a project-based suite supporting recursive crawling, layout component detection, and granular per-page audit selections.
+
+**Requirements:**
+- V2-PROJ-01: Support creating "Projects" with a base URL
+- V2-CRAWL-01: Site pages crawl via sitemap/Linkinator to discover all URLs
+- V2-COMP-01: Single-page component crawl to output semantic layout areas
+- V2-AUDIT-01: Selectable audit execution (Console/Network, Axe, Lighthouse) per-page
+- V2-AUDIT-02: Site-wide broken links scan
+- V2-DATA-01: Database migration for projects and project_pages
+
+**Plans:**
+0/3 plans complete
+
+**Success Criteria:**
+1. User can create a project via Dashboard.
+2. User can trigger a crawl that populates the project with all discovered pages.
+3. User can run accessibility/performance audits on a specific subset of those pages.
+4. Minor Lighthouse issues (score > 0.70) are filtered out automatically.
+
+**UAT:**
+- Create project `softsite.ro`, crawl to find 5+ pages, run Axe on 2 of them, verify results are grouped correctly.
 
 ---
 

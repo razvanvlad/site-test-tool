@@ -22,7 +22,7 @@
 
 ### Dashboard (DASH)
 
-- [ ] **DASH-01:** User can open a browser dashboard (`npm start`) showing list of audit runs with URL, date, Lighthouse score summary
+- [x] **DASH-01:** User can open a browser dashboard (`npm start`) showing list of audit runs with URL, date, Lighthouse score summary
 - [ ] **DASH-02:** User can view findings for an audit, filtered by severity (critical/serious/moderate/minor) and category (accessibility/performance/console/network/links/seo)
 - [ ] **DASH-03:** User can mark a finding as false positive, add a note, and change its status (open → fixed / wontfix)
 - [ ] **DASH-04:** User can see before/after/diff screenshot side-by-side for any finding that has a fix tracked
@@ -46,9 +46,19 @@
 - [ ] **SKILL-02:** Skill describes the 6-step audit + report workflow and references `scripts/audit.js` and `scripts/compare.js`
 - [ ] **SKILL-03:** Skill instructs agent: never invent findings, flag bot-protected 403/999 links as "needs manual check"
 
-## v2 Requirements (Deferred)
+## Next/Backlog Requirements
 
-- Pa11y as second accessibility engine alongside axe-core
+- EXT-01: Integration with Pa11y
+- REQ-V2-01: (Moved to Phase 5)
+
+## Phase 5: Project & Multi-Page Engine (v2)
+
+- **V2-PROJ-01:** Support creating "Projects" with a base URL
+- **V2-CRAWL-01:** Site pages crawl via sitemap/Linkinator to discover all URLs
+- **V2-COMP-01:** Single-page component crawl to output semantic layout areas
+- **V2-AUDIT-01:** Selectable audit execution (Console/Network, Axe, Lighthouse) per-page
+- **V2-AUDIT-02:** Site-wide broken links scan
+- **V2-DATA-01:** Database migration for projects and project_pagesside axe-core
 - Recursive link crawl (depth > 1) with sitemap support
 - Hosted dashboard (Postgres backend, HTTP MCP transport for SaaS)
 - Multi-agent audit via Antigravity SDK (Researcher → Auditor → Fixer → Tester pipeline)
