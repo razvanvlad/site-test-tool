@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Site Test Tool - Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="sidebar">
+        <div class="sidebar-header">
+            <h1>Audit Runs</h1>
+        </div>
+        <ul id="audit-list">
+            <!-- Populated by JS -->
+        </ul>
+    </div>
+    
+    <div id="main">
+        <div class="main-header">
+            <h2 id="current-audit-title">Select an Audit</h2>
+            <div class="filters">
+                <select id="filter-severity">
+                    <option value="">All Severities</option>
+                    <option value="critical">Critical</option>
+                    <option value="serious">Serious</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="minor">Minor</option>
+                </select>
+                <select id="filter-category">
+                    <option value="">All Categories</option>
+                    <!-- Populated by JS -->
+                </select>
+                <select id="filter-status">
+                    <option value="">All Statuses</option>
+                    <option value="open">Open</option>
+                    <option value="fixed">Fixed</option>
+                    <option value="wontfix">Won't Fix</option>
+                </select>
+            </div>
+        </div>
+        
+        <div id="content">
+            <table id="findings-table" style="display: none;">
+                <thead>
+                    <tr>
+                        <th>Engine</th>
+                        <th>Category</th>
+                        <th>Severity</th>
+                        <th>Message</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="findings-body">
+                    <!-- Populated by JS -->
+                </tbody>
+            </table>
+            <div id="empty-state" style="text-align: center; color: var(--text-muted); margin-top: 50px;">
+                Select an audit from the sidebar to view its findings.
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
