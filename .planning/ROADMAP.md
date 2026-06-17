@@ -9,7 +9,7 @@
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 1 | CLI Engine | `node audit.js <url>` produces verified findings | AUDIT-01–06, DATA-01–04 | 5 signal types, SQLite populated, JSON report file |
+| 1 | CLI Engine | 2/3 | In Progress|  |
 | 2 | Dashboard + Fix Tracker | Triage client findings end-to-end in browser UI | DASH-01–04, DIFF-01–02 | List, filter, update finding status, see screenshot diff |
 | 3 | MCP Server | Antigravity can call `run_audit()` and get findings | MCP-01–05 | MCP Inspector passes, Antigravity triggers audit via chat |
 | 4 | Agent Skill + Polish | Agent runs audit workflow from natural language | SKILL-01–03 | Fresh session: "QA this site" runs audit and reports clearly |
@@ -33,7 +33,7 @@
 - DATA-04: `fix_tracker` table schema (created now, used in Phase 2)
 
 **Plans:**
-1. **Project scaffold + SQLite schema** — `npm init`, install deps, `db/schema.sql`, `src/db.js`
+2/3 plans executed
 2. **Playwright capture engine** — `src/engines/playwright-capture.js` (console, network, screenshot)
 3. **Lighthouse + axe runner** — `src/engines/lighthouse-runner.js` + `src/engines/axe-runner.js`
 4. **Linkinator runner** — `src/engines/link-checker.js`
