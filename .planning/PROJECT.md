@@ -59,10 +59,10 @@ A **local-first website audit engine** that captures real-browser signals — sc
 - [ ] **AUDIT-04:** Linkinator broken-link scan (shallow, depth 1)
 - [ ] **AUDIT-05:** All findings normalized and stored in SQLite (audits + findings tables)
 - [ ] **AUDIT-06:** JSON report file output per audit run
-- [ ] **DASH-01:** Express dashboard — list audits, list findings (filterable by severity/category)
-- [ ] **DASH-02:** Mark finding as false positive, add notes, change status (open/fixed/wontfix)
-- [ ] **DIFF-01:** Before/after screenshot capture + pixelmatch diff with pixel count + percentage
-- [ ] **DIFF-02:** Side-by-side before/after/diff view in dashboard
+  - ✓ DASH-01: Express dashboard — list audits, list findings (filterable by severity/category) (Validated in Phase 2)
+  - ✓ DASH-02: Mark finding as false positive, add notes, change status (open/fixed/wontfix) (Validated in Phase 2)
+  - ✓ DIFF-01: Before/after screenshot capture + pixelmatch diff with pixel count + percentage (Validated in Phase 2)
+  - ✓ DIFF-02: Side-by-side before/after/diff view in dashboard (Validated in Phase 2)
 - [ ] **MCP-01:** MCP server exposing `run_audit(url)`, `get_findings(auditId)`, `compare_screenshots(findingId)`
 - [ ] **MCP-02:** Registered in `~/.gemini/config/mcp_config.json` and testable via MCP Inspector
 - [ ] **SKILL-01:** `site-audit-reporter` SKILL.md at `~/.gemini/config/skills/site-audit-reporter/`
@@ -121,4 +121,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-17 after initialization — blueprint v1 + MCP discovery session*
+*Last updated: 2026-06-17 after Phase 2 completion*
