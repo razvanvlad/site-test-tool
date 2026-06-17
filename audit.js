@@ -7,6 +7,8 @@ import { runAxe } from './src/engines/axe-runner.js';
 import { runLighthouse } from './src/engines/lighthouse-runner.js';
 import { checkLinks } from './src/engines/link-checker.js';
 import { normalizeFindings } from './src/normalize.js';
+import chalk from 'chalk';
+import ora from 'ora';
 
 async function main() {
   const url = process.argv[2];
@@ -28,10 +30,10 @@ async function main() {
   const auditInfo = insertAudit.run(url, new Date().toISOString(), 'running');
   const auditId = auditInfo.lastInsertRowid;
 
-  console.log(`\n--- Starting Audit for ${url} ---`);
+  console.log(chalk.bold.blue(`\n--- Starting Audit for ${url} ---`));
   
   // 1. Playwright & Axe
-  console.log('[1/4] Running Playwright (Console/Network/Screenshot)...');
+  let spinner = ora('Running Playwright (Console/Network/Screenshot)...').start();
   const browser = await chromium.launch();
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -41,23 +43,27 @@ async function main() {
   const screenshotPathAbsolute = path.resolve(process.cwd(), screenshotPathRelative);
 
   const { consoleErrors, failedRequests } = await captureSignals(url, page, { screenshotPath: screenshotPathAbsolute });
+  spinner.succeed('Playwright completed');
 
-  console.log('[2/4] Running axe-core for accessibility...');
+  spinner = ora('Running axe-core for accessibility...').start();
   const axeViolations = await runAxe(page);
   
   await browser.close();
+  spinner.succeed('axe-core completed');
 
   // 2. Lighthouse
-  console.log('[3/4] Running Lighthouse...');
+  spinner = ora('Running Lighthouse...').start();
   const { lhr: lighthouseLhr, error: lhError } = await runLighthouse(url);
-  if (lhError) console.error('Lighthouse Error:', lhError);
+  if (lhError) console.error(chalk.red('Lighthouse Error:'), lhError);
+  spinner.succeed('Lighthouse completed');
 
   // 3. Linkinator
-  console.log('[4/4] Running Linkinator...');
+  spinner = ora('Running Linkinator...').start();
   const brokenLinks = await checkLinks(url);
+  spinner.succeed('Linkinator completed');
 
   // Normalize
-  console.log('\n--- Normalizing Findings ---');
+  spinner = ora('Normalizing Findings...').start();
   const normalized = normalizeFindings({
     consoleErrors,
     failedRequests,
@@ -65,6 +71,7 @@ async function main() {
     lighthouseLhr,
     brokenLinks
   });
+  spinner.succeed('Findings normalized and saved');
 
   // Insert Findings
   const insertFinding = db.prepare(`
@@ -122,14 +129,16 @@ async function main() {
     categoryCounts[f.category] = (categoryCounts[f.category] || 0) + 1;
   }
 
-  console.log('\n--- Audit Complete ---');
-  console.log(`Report: ${reportPath}`);
-  console.log(`Screenshot: ${screenshotPathRelative}`);
-  console.log('\nSeverity Summary:');
-  console.log(`Critical: ${severityCounts.critical} | Serious: ${severityCounts.serious} | Moderate: ${severityCounts.moderate} | Minor: ${severityCounts.minor}`);
-  console.log('\nCategory Summary:');
+  console.log(chalk.bold.green('\n--- Audit Complete ---'));
+  console.log(`Report: ${chalk.cyan(reportPath)}`);
+  console.log(`Screenshot: ${chalk.cyan(screenshotPathRelative)}`);
+  
+  console.log(chalk.bold('\nSeverity Summary:'));
+  console.log(`${chalk.red.bold('Critical:')} ${severityCounts.critical} | ${chalk.red('Serious:')} ${severityCounts.serious} | ${chalk.yellow('Moderate:')} ${severityCounts.moderate} | ${chalk.blue('Minor:')} ${severityCounts.minor}`);
+  
+  console.log(chalk.bold('\nCategory Summary:'));
   for (const [cat, count] of Object.entries(categoryCounts)) {
-    console.log(`- ${cat}: ${count}`);
+    console.log(`- ${cat}: ${chalk.yellow(count)}`);
   }
 }
 
