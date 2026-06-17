@@ -9,7 +9,7 @@
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 1 | CLI Engine | 3/3 | Complete   | 2026-06-17 |
+| 1 | CLI Engine | 3/3 | Complete    | 2026-06-17 |
 | 2 | Dashboard + Fix Tracker | Triage client findings end-to-end in browser UI | DASH-01–04, DIFF-01–02 | List, filter, update finding status, see screenshot diff |
 | 3 | MCP Server | Antigravity can call `run_audit()` and get findings | MCP-01–05 | MCP Inspector passes, Antigravity triggers audit via chat |
 | 4 | Agent Skill + Polish | Agent runs audit workflow from natural language | SKILL-01–03 | Fresh session: "QA this site" runs audit and reports clearly |

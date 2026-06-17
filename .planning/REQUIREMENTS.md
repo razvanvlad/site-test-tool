@@ -6,7 +6,7 @@
 
 ### Audit Engine (AUDIT)
 
-- [ ] **AUDIT-01:** User can run `node audit.js <url>` and capture: console errors, uncaught JS exceptions, failed network requests (4xx/5xx), full-page screenshot
+- [x] **AUDIT-01:** User can run `node audit.js <url>` and capture: console errors, uncaught JS exceptions, failed network requests (4xx/5xx), full-page screenshot
 - [ ] **AUDIT-02:** User can get Lighthouse scores (performance, accessibility, SEO, best-practices) for a URL via Node API integration
 - [ ] **AUDIT-03:** User can get axe-core WCAG 2.1 AA accessibility violations for a URL, normalized from `@axe-core/playwright`
 - [ ] **AUDIT-04:** User can get broken link report for a URL at depth 1 via linkinator (BROKEN state links with parent URL and HTTP status)

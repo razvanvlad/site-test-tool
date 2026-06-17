@@ -42,12 +42,20 @@ A **local-first website audit engine** that captures real-browser signals — sc
 - ✓ Chrome — `C:\Program Files\Google\Chrome\Application\chrome.exe`
 - ✓ MCP config at `C:\Users\razva\.gemini\config\mcp_config.json` — confirmed active
 - ✓ Skills directory at `C:\Users\razva\.gemini\config\skills\` — 51 skills present
+- ✓ AUDIT-01: Capture full-page screenshot of target URL (Validated in Phase 1: CLI Engine)
+- ✓ AUDIT-02: Capture console errors and uncaught JS exceptions (Validated in Phase 1: CLI Engine)
+- ✓ AUDIT-03: Capture failed network requests and HTTP 4xx/5xx responses (Validated in Phase 1: CLI Engine)
+- ✓ AUDIT-04: Integrate standard audit engines (Lighthouse, axe-core, linkinator) (Validated in Phase 1: CLI Engine)
+- ✓ AUDIT-05: Run all checks automatically against a provided URL (Validated in Phase 1: CLI Engine)
+- ✓ AUDIT-06: Normalize output into a unified finding shape (Validated in Phase 1: CLI Engine)
+- ✓ DATA-01: Local-first persistence using SQLite (Validated in Phase 1: CLI Engine)
+- ✓ DATA-02: Store raw audit run metadata (Validated in Phase 1: CLI Engine)
+- ✓ DATA-03: Save JSON snapshot reports to disk (Validated in Phase 1: CLI Engine)
+- ✓ DATA-04: No external API calls for data storage (Validated in Phase 1: CLI Engine)
 
-### Active
+## Active Requirements
 
-- [ ] **AUDIT-01:** `node audit.js <url>` captures console errors, JS exceptions, network failures (4xx/5xx), screenshots
-- [ ] **AUDIT-02:** Lighthouse scores (perf, a11y, SEO, best-practices) per URL
-- [ ] **AUDIT-03:** axe-core WCAG 2.1 AA violations per URL
+### Dashboard (Phase 2)
 - [ ] **AUDIT-04:** Linkinator broken-link scan (shallow, depth 1)
 - [ ] **AUDIT-05:** All findings normalized and stored in SQLite (audits + findings tables)
 - [ ] **AUDIT-06:** JSON report file output per audit run
