@@ -1,14 +1,23 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import { initDb } from './src/db.js';
 import { exec, spawn } from 'child_process';
 import util from 'util';
 import { crawlSite } from './src/engines/crawl.js';
 import { GoogleGenAI } from '@google/genai';
-import dotenv from 'dotenv';
+import { proposeFix, findMatchingFile } from './src/utils/code-healer.js';
+import { callAI, quotaState } from './src/utils/ai-router.js';
+import fs from 'fs';
+import path from 'path';
+import pixelmatch from 'pixelmatch';
+import { PNG } from 'pngjs';
+import { runAxe } from './src/engines/axe-runner.js';
+import { runLighthouse } from './src/engines/lighthouse-runner.js';
+import { chromium, devices } from 'playwright';
 
-dotenv.config();
-
-const ai = new GoogleGenAI({}); // Uses process.env.GEMINI_API_KEY
+const ai = new GoogleGenAI({}); // Used for non-routed direct calls (kept for compatibility)
 
 const execPromise = util.promisify(exec);
 
@@ -17,6 +26,13 @@ const port = process.env.PORT || 3000;
 
 // Initialize database
 const db = initDb();
+
+// Clean up any stale running audits from previous sessions on startup
+try {
+  db.prepare("UPDATE audits SET status = 'error', progress = 'Server restarted' WHERE status = 'running'").run();
+} catch (err) {
+  console.error('Failed to clean up stale audits:', err);
+}
 
 // Middleware
 app.use(express.json());
@@ -49,6 +65,13 @@ app.post('/api/run-audit', async (req, res) => {
 
     child.on('close', (code) => {
       console.log(`Audit child process exited with code ${code}`);
+      if (code !== 0 && project_id) {
+        try {
+          db.prepare("UPDATE audits SET status = 'error', progress = ? WHERE project_id = ? AND status = 'running'").run(`Failed with exit code ${code}`, project_id);
+        } catch (dbErr) {
+          console.error('Failed to update audit error status in DB:', dbErr);
+        }
+      }
     });
 
     // Return immediately so the UI doesn't hang
@@ -69,7 +92,23 @@ app.get('/api/projects', (req, res) => {
   }
 });
 
-// POST /api/findings/:id/ai-explain - Uses Gemini to explain a finding
+// GET /api/ai-status - Returns AI model availability and quota state
+app.get('/api/ai-status', (req, res) => {
+  res.json({
+    gemini: {
+      configured: !!process.env.GEMINI_API_KEY,
+      exhausted: quotaState.gemini.exhausted,
+      resetAt: quotaState.gemini.resetAt,
+    },
+    groq: {
+      configured: !!process.env.GROQ_API_KEY,
+      exhausted: quotaState.groq.exhausted,
+      resetAt: quotaState.groq.resetAt,
+    },
+  });
+});
+
+// POST /api/findings/:id/ai-explain - Uses AI to explain a finding
 app.post('/api/findings/:id/ai-explain', async (req, res) => {
   try {
     const { id } = req.params;
@@ -79,49 +118,43 @@ app.post('/api/findings/:id/ai-explain', async (req, res) => {
     
     // If we already have an explanation, return it instantly
     if (finding.ai_explanation) {
-      return res.json({ explanation: finding.ai_explanation });
+      return res.json({ explanation: finding.ai_explanation, modelUsed: 'cached' });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({ error: 'GEMINI_API_KEY is not set in .env file.' });
+    if (!process.env.GEMINI_API_KEY && !process.env.XAI_API_KEY) {
+      return res.status(500).json({ error: 'No AI API key configured. Set GEMINI_API_KEY or XAI_API_KEY in .env' });
     }
 
-    const prompt = `
-You are an expert web developer and accessibility specialist acting as an AI assistant for a Content Administrator. 
-The user found a bug/issue on their website using an automated testing tool.
+    const preferredModel = req.query.model || 'auto';
 
-Here are the technical details of the bug:
+    const systemPrompt = 'You are an expert web developer and accessibility specialist acting as an AI assistant for a Content Administrator. Be extremely concise — maximum 3 sentences total.';
+
+    const prompt = `The user found a bug/issue on their website:
 - Category: ${finding.category}
 - Severity: ${finding.severity}
 - Title: ${finding.title}
 - Description: ${finding.description || 'N/A'}
 - Selector: ${finding.selector || 'N/A'}
-- Source URL (if any): ${finding.source_url || 'N/A'}
+- Source URL: ${finding.source_url || 'N/A'}
 - HTML Snippet:
 \`\`\`html
 ${finding.html_snippet || 'N/A'}
 \`\`\`
 
-Please provide a helpful, plain-English response. Your response should have two clear sections formatted exactly like this:
-
+Provide a helpful, plain-English response with exactly two sections:
 **What this means:**
-[Explain the technical issue in simple, non-technical terms that a content administrator would understand. For example, if it's a 404, say "An image or video link is broken and failing to load."]
+[1 sentence explaining the issue]
 
 **How to fix it:**
-[Give 1-3 practical, actionable steps on how they can fix this. Focus on what a content admin can do, like uploading a missing image in WordPress, fixing a typo in a link, or changing text colors for contrast. If it requires a developer, explicitly say "You will need to ask a developer to..."]
+[1-2 actionable steps]
 `;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-    });
-
-    const explanation = response.text;
+    const { text: explanation, modelUsed } = await callAI({ prompt, systemPrompt, jsonMode: false, preferredModel });
 
     // Save to database
     db.prepare('UPDATE findings SET ai_explanation = ? WHERE id = ?').run(explanation, id);
 
-    res.json({ explanation });
+    res.json({ explanation, modelUsed });
   } catch (err) {
     console.error('AI Explain Error:', err);
     res.status(500).json({ error: 'Failed to generate explanation. Check server logs.' });
@@ -130,13 +163,43 @@ Please provide a helpful, plain-English response. Your response should have two 
 
 // POST /api/projects
 app.post('/api/projects', (req, res) => {
-  const { name, base_url } = req.body;
+  const { name, base_url, local_path } = req.body;
   if (!name || !base_url) return res.status(400).json({ error: 'Name and Base URL required' });
   try {
-    const info = db.prepare('INSERT INTO projects (name, base_url, created_at) VALUES (?, ?, ?)')
-                   .run(name, base_url, new Date().toISOString());
-    res.json({ id: info.lastInsertRowid, name, base_url });
+    const info = db.prepare('INSERT INTO projects (name, base_url, local_path, created_at) VALUES (?, ?, ?, ?)')
+                   .run(name, base_url, local_path || null, new Date().toISOString());
+    res.json({ id: info.lastInsertRowid, name, base_url, local_path });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/projects/:id
+app.delete('/api/projects/:id', (req, res) => {
+  const { id } = req.params;
+  try {
+    db.transaction(() => {
+      // Find all findings for this project's audits to delete fix_tracker entries
+      const audits = db.prepare('SELECT id FROM audits WHERE project_id = ?').all(id);
+      for (const audit of audits) {
+        const findings = db.prepare('SELECT id FROM findings WHERE audit_id = ?').all(audit.id);
+        for (const finding of findings) {
+          db.prepare('DELETE FROM fix_tracker WHERE finding_id = ?').run(finding.id);
+        }
+        db.prepare('DELETE FROM findings WHERE audit_id = ?').run(audit.id);
+      }
+      
+      db.prepare('DELETE FROM audits WHERE project_id = ?').run(id);
+      db.prepare('DELETE FROM project_pages WHERE project_id = ?').run(id);
+      const result = db.prepare('DELETE FROM projects WHERE id = ?').run(id);
+      
+      if (result.changes === 0) {
+        throw new Error('Project not found');
+      }
+    })();
+    res.json({ success: true, message: 'Project and all related data deleted' });
+  } catch (err) {
+    console.error('Delete project error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -199,7 +262,7 @@ app.get('/api/projects/:id/export', (req, res) => {
   const { id } = req.params;
   try {
     const findings = db.prepare(`
-      SELECT f.*, p.url as page_url 
+      SELECT f.*, COALESCE(p.url, a.url) as page_url 
       FROM findings f 
       LEFT JOIN project_pages p ON f.page_id = p.id
       JOIN audits a ON f.audit_id = a.id
@@ -353,6 +416,483 @@ app.patch('/api/findings/:id', (req, res) => {
   } catch (error) {
     console.error('Error updating finding:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PUT /api/projects/:id
+app.put('/api/projects/:id', (req, res) => {
+  try {
+    const { local_path } = req.body;
+    const stmt = db.prepare(`UPDATE projects SET local_path = ? WHERE id = ?`);
+    stmt.run(local_path || null, req.params.id);
+    res.json({ success: true, local_path });
+  } catch (err) {
+    console.error('Error updating project:', err);
+    res.status(500).json({ error: 'Failed to update project' });
+  }
+});
+
+// POST /api/audits/:id/ai-summary - Generates summary and tasks via Gemini
+app.post('/api/audits/:id/ai-summary', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const audit = db.prepare('SELECT * FROM audits WHERE id = ?').get(id);
+    if (!audit) return res.status(404).json({ error: 'Audit not found' });
+
+    // If already generated, return cached version (unless force parameter is true)
+    if (audit.ai_summary && audit.ai_tasks && req.query.force !== 'true') {
+      return res.json({
+        summary: audit.ai_summary,
+        tasks: JSON.parse(audit.ai_tasks)
+      });
+    }
+
+    if (!process.env.GEMINI_API_KEY && !process.env.XAI_API_KEY) {
+      return res.status(500).json({ error: 'No AI API key configured. Set GEMINI_API_KEY or XAI_API_KEY in .env' });
+    }
+
+    const findings = db.prepare('SELECT * FROM findings WHERE audit_id = ?').all(id);
+    if (findings.length === 0) {
+      return res.json({
+        summary: 'No findings recorded for this audit.',
+        tasks: []
+      });
+    }
+
+    const uniqueFindings = [];
+    const seen = new Set();
+    const severityStats = { critical: 0, serious: 0, moderate: 0, minor: 0 };
+    const categoryStats = {};
+
+    for (const f of findings) {
+      severityStats[f.severity] = (severityStats[f.severity] || 0) + 1;
+      categoryStats[f.category] = (categoryStats[f.category] || 0) + 1;
+
+      const key = `${f.category}:${f.severity}:${f.title}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueFindings.push({
+          category: f.category,
+          severity: f.severity,
+          title: f.title,
+          description: f.description
+        });
+      }
+    }
+
+    let techStackTags = [];
+    if (audit.project_id) {
+      const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(audit.project_id);
+      if (project && project.tech_stack) {
+        try {
+          techStackTags = JSON.parse(project.tech_stack);
+        } catch (e) {}
+      }
+    }
+
+    const preferredModel = req.query.model || 'auto';
+
+    const systemPrompt = 'You are an expert web developer and accessibility specialist acting as an AI assistant for a developer/Content Administrator auditing their site. Always respond with valid JSON only — no markdown, no code fences.';
+
+    const prompt = `Analyze the following test findings for a website audit:
+
+Audit URL: ${audit.url}
+Lighthouse Scores: Performance: ${audit.lighthouse_perf || 'N/A'}, Accessibility: ${audit.lighthouse_a11y || 'N/A'}, SEO: ${audit.lighthouse_seo || 'N/A'}
+Detected Tech Stack: ${techStackTags.length > 0 ? techStackTags.join(', ') : 'None detected'}
+
+Findings Summary Stats:
+- Total Findings: ${findings.length}
+- By Severity: Critical: ${severityStats.critical}, Serious: ${severityStats.serious}, Moderate: ${severityStats.moderate}, Minor: ${severityStats.minor}
+- By Category: ${JSON.stringify(categoryStats)}
+
+Detailed Findings (Aggregated):
+${uniqueFindings.slice(0, 100).map((f, i) => `${i+1}. [${f.category.toUpperCase()} | ${f.severity.toUpperCase()}] ${f.title} - ${f.description || 'No description'}`).join('\n')}
+
+Generate:
+1. A concise, professional executive summary in markdown. The summary MUST consist of EXACTLY these two main headings and sections (do not include any other parent headings):
+   - ## 🖥️ Desktop Analysis & Summary
+     Summarize standard desktop-related findings (Performance, Accessibility, SEO, Console, Network, Links). State the general usability and speed of the desktop experience.
+   - ## 📱 Mobile Responsiveness Analysis
+     Summarize design-related mobile viewport findings (Design category, Gemini-Vision annotations). Highlight layout bugs, spacing issues, truncated text, and element collisions on mobile screens.
+   Do not mention finding database IDs in the summary.
+2. A prioritized action items list (check list).
+   - Priority 1: Critical/Serious findings.
+   - Priority 2: Moderate findings.
+   - Priority 3: Minor findings.
+   - Ensure each task has a clear title, a description (mentioning whether it is a Desktop fix or Mobile responsiveness fix), priority (1, 2, or 3), and category.
+   - **Tech Stack Customization**: Since the site's detected tech stack is "${techStackTags.length > 0 ? techStackTags.join(', ') : 'None/Vanilla CSS'}", tailor the descriptions and titles of the tasks to give platform-specific advice.
+
+You MUST respond with a JSON object of this structure:
+{
+  "summary": "markdown string of the summary",
+  "tasks": [
+    {
+      "priority": 1,
+      "title": "Task Title",
+      "description": "How to resolve it...",
+      "category": "accessibility"
+    }
+  ]
+}
+Return ONLY valid JSON.`;
+
+    const { text: rawText, modelUsed } = await callAI({ prompt, systemPrompt, jsonMode: true, preferredModel });
+
+    let resultJson;
+    try {
+      const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+      resultJson = JSON.parse(cleanJson);
+    } catch (parseErr) {
+      console.error('Failed to parse AI JSON output:', rawText);
+      throw new Error('Invalid JSON format returned from AI.');
+    }
+
+    const summary = resultJson.summary || 'Summary generation failed.';
+    const tasks = resultJson.tasks || [];
+    tasks.forEach(t => {
+      t.id = Math.random().toString(36).substr(2, 9);
+      t.status = 'open';
+      t.agentNotes = '';
+    });
+    const tasksStr = JSON.stringify(tasks);
+
+    // Save to database
+    db.prepare('UPDATE audits SET ai_summary = ?, ai_tasks = ? WHERE id = ?')
+      .run(summary, tasksStr, id);
+
+    res.json({ summary, tasks, modelUsed });
+  } catch (err) {
+    console.error('AI Summary Error:', err);
+    res.status(500).json({ error: 'Failed to generate audit summary. Check server logs.' });
+  }
+});
+
+// GET /api/audits/:id/summary - Retrieves cached summary and tasks
+app.get('/api/audits/:id/summary', (req, res) => {
+  try {
+    const { id } = req.params;
+    const audit = db.prepare('SELECT ai_summary, ai_tasks FROM audits WHERE id = ?').get(id);
+    if (!audit) return res.status(404).json({ error: 'Audit not found' });
+
+    res.json({
+      summary: audit.ai_summary || null,
+      tasks: audit.ai_tasks ? JSON.parse(audit.ai_tasks) : null
+    });
+  } catch (err) {
+    console.error('Error fetching cached summary:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+// PUT /api/audits/:id/tasks/:taskId - Updates a specific task's status and notes
+app.put('/api/audits/:id/tasks/:taskId', (req, res) => {
+  try {
+    const { id, taskId } = req.params;
+    const { status, agentNotes } = req.body;
+
+    const audit = db.prepare('SELECT ai_tasks FROM audits WHERE id = ?').get(id);
+    if (!audit || !audit.ai_tasks) {
+      return res.status(404).json({ error: 'Audit or tasks not found' });
+    }
+
+    const tasks = JSON.parse(audit.ai_tasks);
+    const taskIndex = tasks.findIndex(t => t.id === taskId);
+    if (taskIndex === -1) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    if (status !== undefined) tasks[taskIndex].status = status;
+    if (agentNotes !== undefined) tasks[taskIndex].agentNotes = agentNotes;
+
+    const updatedTasksStr = JSON.stringify(tasks);
+    db.prepare('UPDATE audits SET ai_tasks = ? WHERE id = ?').run(updatedTasksStr, id);
+
+    res.json({ success: true, tasks });
+  } catch (err) {
+    console.error('Error updating task:', err);
+    res.status(500).json({ error: 'Failed to update task' });
+  }
+});
+// POST /api/findings/:id/propose-fix - Proposes a code fix for a finding using Gemini
+app.post('/api/findings/:id/propose-fix', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const finding = db.prepare('SELECT * FROM findings WHERE id = ?').get(id);
+    if (!finding) return res.status(404).json({ error: 'Finding not found' });
+
+    const audit = db.prepare('SELECT * FROM audits WHERE id = ?').get(finding.audit_id);
+    let localPath = null;
+    if (audit && audit.project_id) {
+      const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(audit.project_id);
+      if (project && project.local_path) {
+        localPath = project.local_path;
+      }
+    }
+
+    const preferredModel = req.query.model || 'auto';
+    const fileContext = findMatchingFile(localPath, finding);
+    const fixResult = await proposeFix(finding, fileContext, preferredModel);
+    res.json(fixResult);
+  } catch (err) {
+    console.error('Propose Fix Error:', err);
+    res.status(500).json({ error: err.message || 'Failed to propose fix.' });
+  }
+});
+
+// POST /api/findings/:id/apply-fix - Writes the proposed code fix directly to the source file
+app.post('/api/findings/:id/apply-fix', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { file_path, original_code, replacement_code } = req.body;
+    if (!file_path || !original_code || !replacement_code) {
+      return res.status(400).json({ error: 'Missing parameters in body' });
+    }
+
+    const finding = db.prepare('SELECT * FROM findings WHERE id = ?').get(id);
+    if (!finding) return res.status(404).json({ error: 'Finding not found' });
+
+    const audit = db.prepare('SELECT * FROM audits WHERE id = ?').get(finding.audit_id);
+    if (!audit || !audit.project_id) return res.status(400).json({ error: 'Project not linked' });
+
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(audit.project_id);
+    if (!project || !project.local_path) return res.status(400).json({ error: 'Local path not set' });
+
+    // Security check: Ensure file_path resides within local_path
+    const absoluteLocalPath = path.resolve(project.local_path);
+    const absoluteFilePath = path.resolve(file_path);
+    if (!absoluteFilePath.startsWith(absoluteLocalPath)) {
+      return res.status(403).json({ error: 'Security violation: Target file path is outside the project directory.' });
+    }
+
+    if (!fs.existsSync(absoluteFilePath)) {
+      return res.status(404).json({ error: 'Target source file does not exist.' });
+    }
+
+    const fileContent = fs.readFileSync(absoluteFilePath, 'utf8');
+    if (!fileContent.includes(original_code)) {
+      return res.status(400).json({ error: 'Source file has changed. Original code snippet not found.' });
+    }
+
+    const updatedContent = fileContent.replace(original_code, replacement_code);
+    fs.writeFileSync(absoluteFilePath, updatedContent, 'utf8');
+
+    // Update database finding status and log the action in notes
+    const updateNotes = (finding.notes || '') + '\n[AI] Applied code fix automatically.';
+    db.prepare("UPDATE findings SET status = 'fixed', notes = ? WHERE id = ?").run(updateNotes, id);
+
+    res.json({ success: true, message: 'Fix applied successfully to local file.' });
+  } catch (err) {
+    console.error('Apply Fix Error:', err);
+    res.status(500).json({ error: err.message || 'Failed to apply fix.' });
+  }
+});
+
+// POST /api/findings/:id/verify-fix - targeted sandbox re-audit for a specific finding
+app.post('/api/findings/:id/verify-fix', async (req, res) => {
+  let browser;
+  try {
+    const { id } = req.params;
+    const finding = db.prepare('SELECT * FROM findings WHERE id = ?').get(id);
+    if (!finding) return res.status(404).json({ error: 'Finding not found' });
+
+    const audit = db.prepare('SELECT * FROM audits WHERE id = ?').get(finding.audit_id);
+    if (!audit) return res.status(404).json({ error: 'Audit not found' });
+
+    const url = audit.url;
+    let isFixed = false;
+    let details = 'Verification completed.';
+
+    if (finding.source_tool === 'axe') {
+      // Accessibility Targeted verification
+      browser = await chromium.launch();
+      const page = await browser.newPage();
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      const violations = await runAxe(page);
+      
+      // Check if the specific accessibility violation selector is still violating
+      const stillViolates = violations.some(v => v.id === finding.title && v.nodes.some(n => n.target && n.target[0] === finding.selector));
+      isFixed = !stillViolates;
+      details = isFixed ? 'Accessibility selector passed Axe check.' : 'Axe accessibility violation still present.';
+      await browser.close();
+      browser = null;
+    } else if (finding.source_tool === 'lighthouse') {
+      // Performance metric re-test
+      const { lhr, error } = await runLighthouse(url);
+      if (error) throw new Error(error);
+      
+      const newAudit = lhr.audits[finding.title];
+      if (newAudit) {
+        // If score is high (> 0.70) or status is passed, it is resolved
+        isFixed = newAudit.score === null || newAudit.score > 0.70;
+        details = `Lighthouse score for "${finding.title}" is ${newAudit.score || 'N/A'}`;
+      } else {
+        isFixed = true; // metric gone
+        details = 'Audit metric not found in new Lighthouse report.';
+      }
+    } else if (finding.source_tool === 'playwright') {
+      // Console/Network errors verification
+      browser = await chromium.launch();
+      const page = await browser.newPage();
+      const consoleErrors = [];
+      const failedRequests = [];
+      
+      page.on('console', msg => {
+        if (msg.type() === 'error') consoleErrors.push(msg.text());
+      });
+      page.on('pageerror', err => consoleErrors.push(err.message));
+      page.on('requestfailed', req => failedRequests.push(req));
+
+      await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 }).catch(() => {});
+      
+      if (finding.category === 'console') {
+        const stillFails = consoleErrors.some(err => err.includes(finding.description) || finding.description.includes(err));
+        isFixed = !stillFails;
+        details = isFixed ? 'Console error no longer detected.' : 'Console error still detected.';
+      } else {
+        // Network
+        const stillFails = failedRequests.some(req => req.url() === finding.source_url);
+        isFixed = !stillFails;
+        details = isFixed ? 'Network request completed successfully.' : 'Network request still failing.';
+      }
+      await browser.close();
+      browser = null;
+    } else if (finding.source_tool === 'gemini-vision') {
+      // Design / Mobile checks verification
+      // 1. Take a screenshot of the component under Mobile Pixel 5 viewport emulation
+      const pixel5 = devices['Pixel 5'];
+      browser = await chromium.launch();
+      const context = await browser.newContext({ ...pixel5 });
+      const page = await context.newPage();
+      await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+      
+      // Scroll component into view
+      if (finding.selector) {
+        await page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          if (el) el.scrollIntoView();
+        }, finding.selector);
+        await page.waitForTimeout(500);
+      }
+      
+      const newScreenshotName = `verify-highlight-${finding.id}-${Date.now()}.png`;
+      const newScreenshotPath = path.resolve(process.cwd(), 'reports/screenshots', newScreenshotName);
+      
+      const elementHandle = finding.selector ? await page.$(finding.selector) : page;
+      if (elementHandle) {
+        await elementHandle.screenshot({ path: newScreenshotPath });
+      } else {
+        await page.screenshot({ path: newScreenshotPath });
+      }
+      await browser.close();
+      browser = null;
+
+      // 2. Perform visual diff comparison using pixelmatch
+      const beforeImgPath = finding.evidence_path ? path.resolve(process.cwd(), finding.evidence_path) : null;
+      if (beforeImgPath && fs.existsSync(beforeImgPath) && fs.existsSync(newScreenshotPath)) {
+        try {
+          const beforePng = PNG.sync.read(fs.readFileSync(beforeImgPath));
+          const afterPng = PNG.sync.read(fs.readFileSync(newScreenshotPath));
+          
+          // Ensure dimensions match
+          if (beforePng.width === afterPng.width && beforePng.height === afterPng.height) {
+            const { width, height } = beforePng;
+            const diffPng = new PNG({ width, height });
+            
+            const numDiffPixels = pixelmatch(
+              beforePng.data,
+              afterPng.data,
+              diffPng.data,
+              width,
+              height,
+              { threshold: 0.1 }
+            );
+            
+            const diffPct = (numDiffPixels / (width * height)) * 100;
+            const diffFilename = `diff-verify-${finding.id}-${Date.now()}.png`;
+            const diffFilepath = path.resolve(process.cwd(), 'reports/screenshots', diffFilename);
+            
+            fs.writeFileSync(diffFilepath, PNG.sync.write(diffPng));
+            
+            // Save metrics to fix_tracker table
+            db.prepare('DELETE FROM fix_tracker WHERE finding_id = ?').run(finding.id);
+            db.prepare(`
+              INSERT INTO fix_tracker (finding_id, before_screenshot, after_screenshot, diff_image, diff_pixels, diff_percentage, verified, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+              finding.id,
+              finding.evidence_path,
+              `reports/screenshots/${newScreenshotName}`,
+              `reports/screenshots/${diffFilename}`,
+              numDiffPixels,
+              diffPct,
+              diffPct < 1.0 ? 1 : 0,
+              new Date().toISOString()
+            );
+          }
+        } catch (diffErr) {
+          console.error('Pixelmatch error:', diffErr);
+        }
+      }
+
+      // 3. Ask Gemini if the specific layout bug is resolved
+      if (fs.existsSync(newScreenshotPath) && process.env.GEMINI_API_KEY) {
+        const imageBase64 = fs.readFileSync(newScreenshotPath, 'base64');
+        const visionPrompt = `
+Analyze the mobile screenshot of this website component.
+The previous audit flagged a mobile layout bug:
+Issue Title: "${finding.title}"
+Issue Description: "${finding.description}"
+
+Check if this bug has been RESOLVED in the current screenshot.
+Return ONLY a JSON object:
+{
+  "resolved": true,
+  "explanation": "Why do you think it is resolved or still present?"
+}
+`;
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: [
+            visionPrompt,
+            { inlineData: { data: imageBase64, mimeType: 'image/png' } }
+          ],
+        });
+        
+        try {
+          const cleanJson = response.text.replace(/```json/g, '').replace(/```/g, '').trim();
+          const result = JSON.parse(cleanJson);
+          isFixed = result.resolved === true;
+          details = `AI Vision: ${result.explanation}`;
+        } catch (err) {
+          console.error('Failed to parse Gemini verification output:', response.text);
+        }
+      }
+    }
+
+    if (isFixed) {
+      db.prepare("UPDATE findings SET status = 'fixed' WHERE id = ?").run(id);
+    }
+
+    res.json({ success: true, isFixed, details });
+  } catch (err) {
+    if (browser) await browser.close().catch(() => {});
+    console.error('Verify Fix Error:', err);
+    res.status(500).json({ error: err.message || 'Failed to verify fix.' });
+  }
+});
+
+// GET /api/projects/:id/history - Returns Lighthouse score history for plotting charts
+app.get('/api/projects/:id/history', (req, res) => {
+  try {
+    const { id } = req.params;
+    const history = db.prepare(`
+      SELECT started_at, lighthouse_perf, lighthouse_a11y, lighthouse_seo 
+      FROM audits 
+      WHERE project_id = ? AND status = 'done'
+      ORDER BY started_at ASC
+    `).all(id);
+    res.json(history);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

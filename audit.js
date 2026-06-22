@@ -8,6 +8,8 @@ import { runLighthouse } from './src/engines/lighthouse-runner.js';
 import { checkLinks } from './src/engines/link-checker.js';
 import { normalizeFindings } from './src/normalize.js';
 import { annotateFindings } from './src/engines/visual-annotator.js';
+import { runMobileCheck } from './src/engines/mobile-ai-check.js';
+import { detectTechStack } from './src/utils/detector.js';
 import chalk from 'chalk';
 import ora from 'ora';
 
@@ -25,7 +27,7 @@ async function main() {
 
   const projectId = projectArg ? parseInt(projectArg.split('=')[1], 10) : null;
   const pageId = pageArg ? parseInt(pageArg.split('=')[1], 10) : null;
-  const categories = categoriesArg ? categoriesArg.split('=')[1].split(',') : ['console', 'axe', 'lighthouse', 'links', 'visual'];
+  const categories = categoriesArg ? categoriesArg.split('=')[1].split(',') : ['console', 'axe', 'lighthouse', 'links', 'visual', 'mobile'];
 
 
   // Ensure directories exist
@@ -36,10 +38,13 @@ async function main() {
 
   const db = initDb();
   
-  // Create audit entry
-  const insertAudit = db.prepare('INSERT INTO audits (project_id, url, started_at, status) VALUES (?, ?, ?, ?)');
-  const auditInfo = insertAudit.run(projectId, url, new Date().toISOString(), 'running');
+  const insertAudit = db.prepare('INSERT INTO audits (project_id, url, started_at, status, progress) VALUES (?, ?, ?, ?, ?)');
+  const auditInfo = insertAudit.run(projectId, url, new Date().toISOString(), 'running', 'Initializing...');
   const auditId = auditInfo.lastInsertRowid;
+
+  const updateProgress = (msg) => {
+    db.prepare('UPDATE audits SET progress = ? WHERE id = ?').run(msg, auditId);
+  };
 
   console.log(chalk.bold.blue(`\n--- Starting Audit for ${url} ---`));
   
@@ -50,6 +55,7 @@ async function main() {
   const timestamp = Date.now();
 
   if (categories.includes('console') || categories.includes('axe')) {
+    updateProgress('Starting Browser (Playwright)...');
     let spinner = ora('Running Playwright...').start();
     const browser = await chromium.launch();
     const context = await browser.newContext();
@@ -59,6 +65,7 @@ async function main() {
     screenshotPathAbsolute = path.resolve(process.cwd(), screenshotPathRelative);
 
     if (categories.includes('console')) {
+      updateProgress('Capturing Console & Network Errors...');
       const res = await captureSignals(url, page, { screenshotPath: screenshotPathAbsolute });
       consoleErrors = res.consoleErrors;
       failedRequests = res.failedRequests;
@@ -69,9 +76,21 @@ async function main() {
     }
 
     if (categories.includes('axe')) {
+      updateProgress('Scanning Accessibility (Axe-Core)...');
       spinner = ora('Running axe-core for accessibility...').start();
       axeViolations = await runAxe(page);
       spinner.succeed('axe-core completed');
+    }
+    
+    // Detect tech stack
+    try {
+      const htmlContent = await page.content().catch(() => '');
+      const techStack = detectTechStack(htmlContent);
+      if (projectId && techStack.length > 0) {
+        db.prepare('UPDATE projects SET tech_stack = ? WHERE id = ?').run(JSON.stringify(techStack), projectId);
+      }
+    } catch (techErr) {
+      console.error('Tech stack detection error:', techErr);
     }
     
     await browser.close();
@@ -80,6 +99,7 @@ async function main() {
   // 2. Lighthouse
   let lighthouseLhr = null;
   if (categories.includes('lighthouse')) {
+    updateProgress('Running Performance Audit (Lighthouse)...');
     let spinner = ora('Running Lighthouse...').start();
     const { lhr, error: lhError } = await runLighthouse(url);
     lighthouseLhr = lhr;
@@ -90,19 +110,31 @@ async function main() {
   // 3. Linkinator
   let brokenLinks = [];
   if (categories.includes('links')) {
+    updateProgress('Checking for Broken Links (Linkinator)...');
     let spinner = ora('Running Linkinator...').start();
     brokenLinks = await checkLinks(url);
     spinner.succeed('Linkinator completed');
   }
 
+  // 4. Mobile AI Check
+  let mobileFindings = [];
+  if (categories.includes('mobile')) {
+    updateProgress('Running Mobile Responsiveness AI Check...');
+    let spinner = ora('Analyzing mobile layout with Gemini...').start();
+    mobileFindings = await runMobileCheck(url, timestamp);
+    spinner.succeed('Mobile AI Check completed');
+  }
+
   // Normalize
+  updateProgress('Saving Findings...');
   const normSpinner = ora('Normalizing Findings...').start();
   const normalized = normalizeFindings({
     consoleErrors,
     failedRequests,
     axeViolations,
     lighthouseLhr,
-    brokenLinks
+    brokenLinks,
+    mobileFindings
   });
   normSpinner.succeed('Findings normalized and saved');
 
@@ -125,7 +157,7 @@ async function main() {
         f.selector,
         f.source_url,
         f.source_tool,
-        screenshotPathRelative, // Map everything in this audit to the single screenshot for now
+        f.evidence_path || screenshotPathRelative, // Map specific screenshot if present, otherwise default to full screenshot
         f.html_snippet || null,
         f.is_false_positive || 0,
         f.notes || null,
@@ -150,6 +182,7 @@ async function main() {
 
   // Run Visual Annotator
   if (categories.includes('visual')) {
+    updateProgress('Taking Evidence Screenshots (Visual Annotator)...');
     await annotateFindings(auditId, url);
   }
 

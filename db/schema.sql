@@ -2,6 +2,8 @@ CREATE TABLE IF NOT EXISTS projects (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
   base_url TEXT NOT NULL,
+  local_path TEXT,
+  tech_stack TEXT, -- JSON array of detected tags (e.g. ["wordpress", "tailwind"])
   created_at TEXT
 );
 
@@ -20,7 +22,10 @@ CREATE TABLE IF NOT EXISTS audits (
   url TEXT NOT NULL,
   started_at TEXT, finished_at TEXT,
   lighthouse_perf REAL, lighthouse_a11y REAL, lighthouse_seo REAL,
-  status TEXT  -- running | done | error
+  status TEXT,  -- running | done | error
+  progress TEXT,
+  ai_summary TEXT,
+  ai_tasks TEXT
 );
 
 CREATE TABLE IF NOT EXISTS findings (

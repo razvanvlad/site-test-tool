@@ -13,6 +13,7 @@ export async function annotateFindings(auditId, url) {
     SELECT * FROM findings 
     WHERE audit_id = ? 
     AND (selector IS NOT NULL OR source_url IS NOT NULL)
+    AND source_tool != 'gemini-vision'
   `).all(auditId);
 
   if (findings.length === 0) {
@@ -111,8 +112,29 @@ export async function annotateFindings(auditId, url) {
       const filename = `highlighted-${finding.id}-${Date.now()}.png`;
       const filepath = path.join(screenshotDir, filename);
 
-      // Take viewport screenshot showing the red circle in context
-      await page.screenshot({ path: filepath });
+      // Take cropped screenshot showing the red circle in context
+      const box = await locator.boundingBox();
+      if (box) {
+        // Expand the box by 150px for context, but keep it within positive coordinates
+        // Don't go beyond the page dimensions
+        const pageBounds = await page.evaluate(() => ({
+          width: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth),
+          height: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)
+        }));
+
+        const x = Math.max(0, box.x - 150);
+        const y = Math.max(0, box.y - 150);
+        const clip = {
+          x,
+          y,
+          width: Math.min(box.width + 300, pageBounds.width - x),
+          height: Math.min(box.height + 300, pageBounds.height - y)
+        };
+        // Take clipped screenshot without fullPage flag to ensure it respects the clip
+        await page.screenshot({ path: filepath, clip });
+      } else {
+        await locator.screenshot({ path: filepath });
+      }
 
       // Clean up the highlight
       await locator.evaluate((el) => {

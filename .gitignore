@@ -2,3 +2,5 @@ node_modules/
 reports/
 data/
 .env
+*.db
+temp_findings.json

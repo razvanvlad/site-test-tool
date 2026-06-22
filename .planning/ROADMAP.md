@@ -13,7 +13,8 @@
 | 2 | Dashboard + Fix Tracker | 3/3 | Complete    | 2026-06-17 |
 | 3 | MCP Server | 2/2 | Complete   | 2026-06-17 |
 | 4 | Agent Skill + Polish | 2/2 | Complete   | 2026-06-17 |
-| 5 | Project & Multi-Page Engine | 0/3 | Pending | TBD |
+| 5 | Mobile Responsiveness AI Check | 2/2 | Complete   | 2026-06-17 |
+| 6 | AI Audit Summary & Task Recommendations Tabs | 1/1 | Complete | 2026-06-17 |
 
 ---
 
@@ -178,5 +179,15 @@
 - **999.6** — Scheduled audits / cron re-audit of registered URLs
 - **999.7** — Firecrawl integration for advanced crawl + content extraction
 
+### Phase 6: AI Audit Summary and Task Recommendations Tabs
+
+**Goal:** Add a Tabbed view in the dashboard (Findings | AI Summary | Action Tasks) where users can view an AI executive summary report and prioritized task recommendations for any audit run.
+**Requirements:** REQ-AI-SUM-01 (Summary Tab), REQ-AI-SUM-02 (Tasks Tab & Checklist Persistence)
+**Depends on:** Phase 5
+**Plans:** 1/1 plan complete
+
+Plans:
+- [x] **Tabbed Interface, Summary generation, and Task Recommendations checklist** — `06-01-PLAN.md`
+
 ---
-*Generated: 2026-06-17 | Source: site-test-tool-blueprint-v1.md + MCP discovery session*
+*Generated: 2026-06-17 | Source: site-test-tool-blueprint-v2.md + MCP discovery session*

@@ -6,12 +6,21 @@ export async function captureSignals(url, page, options = {}) {
 
   page.on('console', msg => {
     if (msg.type() === 'error') {
-      consoleErrors.push(msg.text());
+      const location = msg.location();
+      consoleErrors.push({
+        text: msg.text(),
+        url: location.url || null,
+        line: location.lineNumber || null
+      });
     }
   });
 
   page.on('pageerror', err => {
-    consoleErrors.push(String(err));
+    consoleErrors.push({
+      text: String(err),
+      url: page.url(),
+      line: null
+    });
   });
 
   page.on('requestfailed', req => {
@@ -33,7 +42,11 @@ export async function captureSignals(url, page, options = {}) {
   try {
     await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
   } catch (error) {
-    consoleErrors.push(`Navigation error: ${error.message}`);
+    consoleErrors.push({
+      text: `Navigation error: ${error.message}`,
+      url,
+      line: null
+    });
   }
 
   const screenshotPath = options.screenshotPath || `reports/screenshots/temp.png`;

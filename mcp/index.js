@@ -63,6 +63,31 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['findingId'],
         },
       },
+      {
+        name: 'get_action_tasks',
+        description: 'Fetches the interactive AI action tasks for a specific audit run.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            auditId: { type: 'number', description: 'The ID of the audit run' },
+          },
+          required: ['auditId'],
+        },
+      },
+      {
+        name: 'update_action_task',
+        description: 'Updates a specific action task (status and agentNotes) for an audit.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            auditId: { type: 'number', description: 'The ID of the audit run' },
+            taskId: { type: 'string', description: 'The unique ID of the task to update' },
+            status: { type: 'string', enum: ['open', 'done'], description: 'The new status of the task' },
+            agentNotes: { type: 'string', description: 'Notes on how the task was resolved' }
+          },
+          required: ['auditId', 'taskId', 'status', 'agentNotes'],
+        },
+      },
     ],
   };
 });
@@ -143,6 +168,56 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: `Compare completed.\n\nOutput:\n${stdout}`,
           },
         ],
+      };
+    }
+
+    if (name === 'get_action_tasks') {
+      const { auditId } = args;
+      if (!auditId) throw new Error('Missing auditId parameter');
+      
+      const db = initDb();
+      const audit = db.prepare('SELECT ai_tasks FROM audits WHERE id = ?').get(auditId);
+      
+      if (!audit || !audit.ai_tasks) {
+        return {
+          content: [ { type: 'text', text: '[]' } ]
+        };
+      }
+      return {
+        content: [ { type: 'text', text: audit.ai_tasks } ]
+      };
+    }
+
+    if (name === 'update_action_task') {
+      const { auditId, taskId, status, agentNotes } = args;
+      if (!auditId || !taskId) throw new Error('Missing parameters');
+      
+      const db = initDb();
+      const audit = db.prepare('SELECT ai_tasks FROM audits WHERE id = ?').get(auditId);
+      
+      if (!audit || !audit.ai_tasks) {
+        throw new Error('Audit or tasks not found');
+      }
+      
+      const tasks = JSON.parse(audit.ai_tasks);
+      const taskIndex = tasks.findIndex(t => t.id === taskId);
+      
+      if (taskIndex === -1) {
+        throw new Error('Task ID not found in this audit');
+      }
+      
+      tasks[taskIndex].status = status;
+      tasks[taskIndex].agentNotes = agentNotes;
+      
+      db.prepare('UPDATE audits SET ai_tasks = ? WHERE id = ?').run(JSON.stringify(tasks), auditId);
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Task ${taskId} updated successfully.\nNew Status: ${status}\nAgent Notes: ${agentNotes}`
+          }
+        ]
       };
     }
 
