@@ -1006,6 +1006,6 @@ app.get('/api/projects/:id/history', (req, res) => {
 });
 
 // Start server
-app.listen(port, () => {
+app.listen(port, '0.0.0.0', () => {
   console.log(`Site Test Tool Dashboard running at http://localhost:${port}`);
 });
