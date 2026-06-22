@@ -9,6 +9,10 @@ import { crawlSite } from './src/engines/crawl.js';
 import { GoogleGenAI } from '@google/genai';
 import { proposeFix, findMatchingFile } from './src/utils/code-healer.js';
 import { callAI, quotaState } from './src/utils/ai-router.js';
+import { generatePdfReport, sendReportEmail, postLeadToPerfexCRM } from './src/utils/pdf-generator.js';
+
+// Track daily PDF generation per IP for rate limiting
+const pdfGenerationCounts = new Map();
 import fs from 'fs';
 import path from 'path';
 import pixelmatch from 'pixelmatch';
@@ -121,11 +125,21 @@ app.post('/api/findings/:id/ai-explain', async (req, res) => {
       return res.json({ explanation: finding.ai_explanation, modelUsed: 'cached' });
     }
 
-    if (!process.env.GEMINI_API_KEY && !process.env.XAI_API_KEY) {
-      return res.status(500).json({ error: 'No AI API key configured. Set GEMINI_API_KEY or XAI_API_KEY in .env' });
+    // Try to get explanation from matched pattern first (saving API costs)
+    let pattern = null;
+    if (finding.fix_pattern_key) {
+      pattern = db.prepare('SELECT * FROM fix_patterns WHERE pattern_key = ?').get(finding.fix_pattern_key);
+    }
+    
+    if (pattern) {
+      const explanation = `**Ce înseamnă aceasta:**\n${pattern.description}\n\n**Impact Business:**\n${pattern.business_impact}\n\n**Cum se rezolvă:**\n${pattern.remediation}`;
+      db.prepare('UPDATE findings SET ai_explanation = ? WHERE id = ?').run(explanation, id);
+      return res.json({ explanation, modelUsed: 'curated_pattern' });
     }
 
-    const preferredModel = req.query.model || 'auto';
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({ error: 'No AI API key configured. Set GEMINI_API_KEY in .env' });
+    }
 
     const systemPrompt = 'You are an expert web developer and accessibility specialist acting as an AI assistant for a Content Administrator. Be extremely concise — maximum 3 sentences total.';
 
@@ -149,7 +163,8 @@ Provide a helpful, plain-English response with exactly two sections:
 [1-2 actionable steps]
 `;
 
-    const { text: explanation, modelUsed } = await callAI({ prompt, systemPrompt, jsonMode: false, preferredModel });
+    // Fall back to Gemini 2.5 Flash if no pattern is available
+    const { text: explanation, modelUsed } = await callAI({ prompt, systemPrompt, jsonMode: false, model: 'gemini-2.5-flash' });
 
     // Save to database
     db.prepare('UPDATE findings SET ai_explanation = ? WHERE id = ?').run(explanation, id);
@@ -490,7 +505,7 @@ app.post('/api/audits/:id/ai-summary', async (req, res) => {
       }
     }
 
-    const preferredModel = req.query.model || 'auto';
+    const summaryModel = 'gemini-2.5-pro';
 
     const systemPrompt = 'You are an expert web developer and accessibility specialist acting as an AI assistant for a developer/Content Administrator auditing their site. Always respond with valid JSON only — no markdown, no code fences.';
 
@@ -536,7 +551,7 @@ You MUST respond with a JSON object of this structure:
 }
 Return ONLY valid JSON.`;
 
-    const { text: rawText, modelUsed } = await callAI({ prompt, systemPrompt, jsonMode: true, preferredModel });
+    const { text: rawText, modelUsed } = await callAI({ prompt, systemPrompt, jsonMode: true, model: summaryModel });
 
     let resultJson;
     try {
@@ -583,6 +598,73 @@ app.get('/api/audits/:id/summary', (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// GET /api/audits/:id/pdf - Generates or downloads A4 PDF report
+app.get('/api/audits/:id/pdf', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const audit = db.prepare('SELECT * FROM audits WHERE id = ?').get(id);
+    if (!audit) return res.status(404).json({ error: 'Audit not found' });
+
+    // Simple IP rate limit (max 3 PDFs per day)
+    const ip = req.ip || 'local';
+    const today = new Date().toISOString().split('T')[0];
+    const rateKey = `${ip}:${today}`;
+    const currentCount = pdfGenerationCounts.get(rateKey) || 0;
+    
+    // Allow bypassing rate limits for localhost / dev
+    const isLocal = ip === '::1' || ip === '127.0.0.1' || ip === 'local';
+    if (currentCount >= 3 && !isLocal && req.query.bypass !== 'true') {
+      return res.status(429).json({ error: 'Limita de descărcare a raportului PDF a fost atinsă (maxim 3 descărcări pe zi).' });
+    }
+    pdfGenerationCounts.set(rateKey, currentCount + 1);
+
+    const reportsDir = path.join(process.cwd(), 'reports');
+    if (!fs.existsSync(reportsDir)) {
+      fs.mkdirSync(reportsDir, { recursive: true });
+    }
+
+    const pdfFileName = `audit-${id}-${Date.now()}.pdf`;
+    const pdfPath = path.join(reportsDir, pdfFileName);
+
+    // Call PDF generator
+    await generatePdfReport(id, db, pdfPath);
+
+    // Send download
+    res.download(pdfPath, `Raport-Audit-${audit.url.replace(/https?:\/\//, '').replace(/[^a-zA-Z0-9.-]/g, '_')}.pdf`);
+  } catch (err) {
+    console.error('Error generating PDF report route:', err);
+    res.status(500).json({ error: err.message || 'Failed to generate PDF.' });
+  }
+});
+
+// POST /api/leads - Handles lead capture form submissions
+app.post('/api/leads', async (req, res) => {
+  try {
+    const { name, email, company, url } = req.body;
+    if (!name || !email || !url) {
+      return res.status(400).json({ error: 'Numele, emailul și URL-ul sunt obligatorii.' });
+    }
+
+    console.error(`[LEAD] New lead capture submission: Nume: ${name}, Email: ${email}, Companie: ${company || 'N/A'}, URL: ${url}`);
+    
+    // 1. Post to PerfexCRM (STUB)
+    const crmResult = await postLeadToPerfexCRM({ name, email, company, url });
+    
+    // 2. Send email notification (STUB)
+    await sendReportEmail(null, 'admin@softsite.ro');
+
+    res.json({
+      success: true,
+      message: 'Cererea dvs. a fost înregistrată! Vă vom trimite raportul PDF pe email în cel mai scurt timp.',
+      leadId: crmResult.leadId
+    });
+  } catch (err) {
+    console.error('Lead capture error:', err);
+    res.status(500).json({ error: 'A apărut o eroare la înregistrarea cererii.' });
+  }
+});
+
 // PUT /api/audits/:id/tasks/:taskId - Updates a specific task's status and notes
 app.put('/api/audits/:id/tasks/:taskId', (req, res) => {
   try {
@@ -619,19 +701,46 @@ app.post('/api/findings/:id/propose-fix', async (req, res) => {
     const finding = db.prepare('SELECT * FROM findings WHERE id = ?').get(id);
     if (!finding) return res.status(404).json({ error: 'Finding not found' });
 
-    const audit = db.prepare('SELECT * FROM audits WHERE id = ?').get(finding.audit_id);
-    let localPath = null;
-    if (audit && audit.project_id) {
-      const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(audit.project_id);
-      if (project && project.local_path) {
-        localPath = project.local_path;
-      }
+    let pattern = null;
+    if (finding.fix_pattern_key) {
+      pattern = db.prepare('SELECT * FROM fix_patterns WHERE pattern_key = ?').get(finding.fix_pattern_key);
     }
 
-    const preferredModel = req.query.model || 'auto';
-    const fileContext = findMatchingFile(localPath, finding);
-    const fixResult = await proposeFix(finding, fileContext, preferredModel);
-    res.json(fixResult);
+    if (pattern) {
+      const audit = db.prepare('SELECT * FROM audits WHERE id = ?').get(finding.audit_id);
+      let localPath = null;
+      if (audit && audit.project_id) {
+        const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(audit.project_id);
+        if (project && project.local_path) {
+          localPath = project.local_path;
+        }
+      }
+
+      const fileContext = localPath ? findMatchingFile(localPath, finding) : null;
+      if (fileContext && fileContext.filePath) {
+        // Read file, send to Gemini with pattern guidelines
+        const fixResult = await proposeFix(finding, fileContext, pattern, 'gemini-2.5-flash');
+        return res.json(fixResult);
+      } else {
+        // Return pattern's generic fix (no AI call)
+        return res.json({
+          has_file_fix: false,
+          file_path: null,
+          original_code: finding.html_snippet || 'N/A',
+          replacement_code: pattern.remediation,
+          explanation: `**Efort estimat:** ${pattern.estimated_hours_low}-${pattern.estimated_hours_high} ore.\n\n**Ghid de remediere:**\n${pattern.remediation}`
+        });
+      }
+    } else {
+      // If no pattern matched
+      return res.json({
+        has_file_fix: false,
+        file_path: null,
+        original_code: finding.html_snippet || 'N/A',
+        replacement_code: '',
+        explanation: 'Nu există o remediere automată definită pentru această eroare. Vă rugăm să analizați manual codul sursă al paginii.'
+      });
+    }
   } catch (err) {
     console.error('Propose Fix Error:', err);
     res.status(500).json({ error: err.message || 'Failed to propose fix.' });

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SoftSite - Audit Website Gratuit</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+    
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background: radial-gradient(circle at top left, #1e1b4b, #0f172a 70%);
+      color: #f8fafc;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+
+    .capture-container {
+      background: rgba(30, 41, 59, 0.45);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      width: 100%;
+      max-width: 540px;
+      padding: 40px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+
+    .capture-header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .capture-header h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 2.2rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #a5b4fc, #6366f1);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 10px;
+    }
+
+    .capture-header p {
+      color: #94a3b8;
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #cbd5e1;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .form-input {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: #f8fafc;
+      font-size: 0.95rem;
+      transition: all 0.3s ease;
+      box-sizing: border-box;
+    }
+
+    .form-input:focus {
+      outline: none;
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+      background: rgba(15, 23, 42, 0.8);
+    }
+
+    .form-input::placeholder {
+      color: #64748b;
+    }
+
+    .submit-btn {
+      width: 100%;
+      background: linear-gradient(135deg, #6366f1, #4f46e5);
+      color: #ffffff;
+      border: none;
+      border-radius: 8px;
+      padding: 14px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      margin-top: 10px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .submit-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px -10px rgba(99, 102, 241, 0.5);
+    }
+
+    .submit-btn:active {
+      transform: translateY(0);
+    }
+
+    .submit-btn:disabled {
+      background: #475569;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .spinner {
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 2px solid #ffffff;
+      width: 16px;
+      height: 16px;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .status-msg {
+      margin-top: 20px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      line-height: 1.4;
+      display: none;
+    }
+
+    .status-msg.success {
+      display: block;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #34d399;
+    }
+
+    .status-msg.error {
+      display: block;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #f87171;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="capture-container">
+    <div class="capture-header">
+      <h1>Audit Website Gratuit</h1>
+      <p>Introdu detaliile de mai jos pentru a primi pe email un raport tehnic detaliat (scoruri performanță, SEO, accesibilitate și remedierea erorilor).</p>
+    </div>
+
+    <form id="lead-form">
+      <div class="form-group">
+        <label for="name" class="form-label">Nume Complet</label>
+        <input type="text" id="name" required placeholder="Ex: Răzvan Vlad" class="form-input">
+      </div>
+
+      <div class="form-group">
+        <label for="email" class="form-label">Adresă Email</label>
+        <input type="email" id="email" required placeholder="Ex: razvan@client.ro" class="form-input">
+      </div>
+
+      <div class="form-group">
+        <label for="company" class="form-label">Companie (Opțional)</label>
+        <input type="text" id="company" placeholder="Ex: SoftSite SRL" class="form-input">
+      </div>
+
+      <div class="form-group">
+        <label for="url" class="form-label">URL Website</label>
+        <input type="url" id="url" required placeholder="Ex: https://istyle.ro" class="form-input">
+      </div>
+
+      <button type="submit" id="submit-btn" class="submit-btn">
+        <span>Solicită Audit Gratuit</span>
+      </button>
+    </form>
+
+    <div id="status-msg" class="status-msg"></div>
+  </div>
+
+  <script>
+    document.getElementById('lead-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      
+      const submitBtn = document.getElementById('submit-btn');
+      const statusMsg = document.getElementById('status-msg');
+      
+      const name = document.getElementById('name').value;
+      const email = document.getElementById('email').value;
+      const company = document.getElementById('company').value;
+      const url = document.getElementById('url').value;
+      
+      statusMsg.className = 'status-msg';
+      statusMsg.style.display = 'none';
+      
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<div class="spinner"></div> <span>Se procesează...</span>';
+      
+      try {
+        const response = await fetch('/api/leads', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ name, email, company, url })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+          statusMsg.textContent = data.message;
+          statusMsg.className = 'status-msg success';
+          statusMsg.style.display = 'block';
+          document.getElementById('lead-form').reset();
+        } else {
+          statusMsg.textContent = data.error || 'A apărut o eroare la trimiterea formularului.';
+          statusMsg.className = 'status-msg error';
+          statusMsg.style.display = 'block';
+        }
+      } catch (err) {
+        console.error(err);
+        statusMsg.textContent = 'A apărut o eroare de rețea. Încearcă din nou.';
+        statusMsg.className = 'status-msg error';
+        statusMsg.style.display = 'block';
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = 'Solicită Audit Gratuit';
+      }
+    });
+  </script>
+
+</body>
+</html>

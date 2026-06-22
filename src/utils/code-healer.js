@@ -111,14 +111,16 @@ export function findMatchingFile(localPath, finding) {
 }
 
 /**
- * Calls Gemini to propose a code fix for the target finding.
+ * Calls Gemini to propose a code fix for the target finding, guided by the fix pattern.
  * @param {object} finding 
  * @param {object|null} fileContext { filePath, content }
- * @returns {promise<object>} Proposed fix JSON
+ * @param {object|null} pattern The matched fix pattern details
+ * @param {string} preferredModel Preferred model to run the request
+ * @returns {Promise<object>} Proposed fix JSON
  */
-export async function proposeFix(finding, fileContext = null, preferredModel = 'auto') {
-  if (!process.env.GEMINI_API_KEY && !process.env.XAI_API_KEY) {
-    throw new Error('No AI API key configured (GEMINI_API_KEY or XAI_API_KEY).');
+export async function proposeFix(finding, fileContext = null, pattern = null, preferredModel = 'gemini-2.5-flash') {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error('No AI API key configured (GEMINI_API_KEY).');
   }
 
   const hasContext = fileContext && fileContext.filePath;
@@ -126,7 +128,7 @@ export async function proposeFix(finding, fileContext = null, preferredModel = '
 
   const systemPrompt = 'You are an expert developer specializing in code remediation, accessibility (WCAG), and responsive CSS. Always respond with valid JSON only — no markdown, no code fences.';
 
-  const prompt = `Analyze this audit finding:
+  let prompt = `Analyze this audit finding:
 
 Tool: ${finding.source_tool}
 Category: ${finding.category}
@@ -135,7 +137,19 @@ Issue: ${finding.title}
 Description: ${finding.description}
 Selector: ${finding.selector || 'N/A'}
 HTML Snippet: ${finding.html_snippet || 'N/A'}
+`;
 
+  if (pattern) {
+    prompt += `
+Remediation Pattern Guidelines:
+- Title: ${pattern.title_template}
+- Guidelines: ${pattern.remediation}
+- Framework Notes: ${pattern.framework_notes || 'N/A'}
+- Business Impact: ${pattern.business_impact}
+`;
+  }
+
+  prompt += `
 ${hasContext ? `We found a matching local source file: "${fileName}"
 File Path: ${fileContext.filePath}
 
@@ -144,7 +158,7 @@ Target File Contents:
 ${fileContext.content}
 \`\`\`
 
-Propose the exact modification to apply to this file to resolve the issue.` : `We do not have a local source file context for this website. Propose a generic CSS/JS/HTML patch to resolve it.`}
+Propose the exact modification to apply to this file to resolve the issue, strictly adhering to the remediation pattern guidelines where applicable.` : `We do not have a local source file context for this website. Propose a generic CSS/JS/HTML patch to resolve it.`}
 
 You MUST respond with a JSON object of this structure:
 {

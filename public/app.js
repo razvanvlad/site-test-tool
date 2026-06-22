@@ -471,8 +471,10 @@ async function loadProjectAudits(id) {
       // Default to the latest audit
       select.value = currentAudits[0].id;
       document.getElementById('delete-audit-btn').style.display = 'inline-block';
+      document.getElementById('download-pdf-btn').style.display = 'inline-block';
     } else {
       document.getElementById('delete-audit-btn').style.display = 'none';
+      document.getElementById('download-pdf-btn').style.display = 'none';
     }
   } catch (err) {
     console.error('Failed to load audits:', err);
@@ -571,8 +573,10 @@ function renderFindings() {
     loadProjectHistory(activeProjectId);
   }
   
-  // Update delete button visibility
-  document.getElementById('delete-audit-btn').style.display = auditFilter !== 'all' ? 'inline-block' : 'none';
+  // Update delete & download button visibility
+  const showBtn = auditFilter !== 'all' ? 'inline-block' : 'none';
+  document.getElementById('delete-audit-btn').style.display = showBtn;
+  document.getElementById('download-pdf-btn').style.display = showBtn;
 
   // Render Lighthouse Dials
   const dialsContainer = document.getElementById('lighthouse-dials');
@@ -1759,3 +1763,24 @@ document.getElementById('edit-local-path-form').addEventListener('submit', async
     btn.textContent = 'Save';
   }
 });
+
+window.downloadPdfReport = function() {
+  const auditSelect = document.getElementById('filter-audit');
+  const auditId = auditSelect.value;
+  if (!auditId || auditId === 'all') {
+    alert('Selectați un audit specific din istoric pentru a descărca raportul PDF.');
+    return;
+  }
+  
+  const btn = document.getElementById('download-pdf-btn');
+  const originalText = btn.innerHTML;
+  btn.innerHTML = '⚡ Se generează...';
+  btn.disabled = true;
+
+  window.location.href = `/api/audits/${auditId}/pdf`;
+  
+  setTimeout(() => {
+    btn.innerHTML = originalText;
+    btn.disabled = false;
+  }, 5000);
+};

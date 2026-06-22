@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS audits (
   status TEXT,  -- running | done | error
   progress TEXT,
   ai_summary TEXT,
-  ai_tasks TEXT
+  ai_tasks TEXT,
+  pdf_path TEXT
 );
 
 CREATE TABLE IF NOT EXISTS findings (
@@ -45,7 +46,8 @@ CREATE TABLE IF NOT EXISTS findings (
   status TEXT DEFAULT 'open',  -- open | fixed | wontfix
   is_false_positive INTEGER DEFAULT 0,
   notes TEXT,
-  created_at TEXT
+  created_at TEXT,
+  fix_pattern_key TEXT REFERENCES fix_patterns(pattern_key)
 );
 
 CREATE TABLE IF NOT EXISTS fix_tracker (
@@ -58,4 +60,18 @@ CREATE TABLE IF NOT EXISTS fix_tracker (
   diff_percentage REAL,
   verified INTEGER DEFAULT 0,
   updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS fix_patterns (
+  pattern_key TEXT PRIMARY KEY,
+  category TEXT NOT NULL,
+  issue_type TEXT,
+  severity TEXT NOT NULL,
+  title_template TEXT NOT NULL,
+  description TEXT NOT NULL,
+  remediation TEXT NOT NULL,
+  business_impact TEXT NOT NULL,
+  estimated_hours_low REAL DEFAULT 0,
+  estimated_hours_high REAL DEFAULT 0,
+  framework_notes TEXT
 );

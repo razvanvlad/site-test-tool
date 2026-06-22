@@ -29,7 +29,7 @@ All findings are persisted to a local SQLite database, exposed via a rich Expres
 - **CSV Export:** Export audit findings for client reporting or external tracking.
 - **Light/Dark Mode:** Seamlessly respects system-level theme preferences.
 
-### 4. Visual Regression Testing
+### 4. Screenshot Evidence (Beta / Internal Use)
 - **Diff Engine (`compare.js`):** Captures an "after" screenshot of a specific finding and runs `pixelmatch` against the original baseline screenshot to calculate pixel differences, proving UI fixes.
 
 ### 5. Agentic Workflows (MCP Integration)
@@ -38,7 +38,7 @@ The tool exposes an MCP stdio server (`mcp/index.js`) allowing autonomous AI age
 - `get_findings`: Fetch normalized JSON or Markdown findings.
 - `get_action_tasks`: Fetch the prioritized AI-generated tasks.
 - `update_action_task`: Let the agent automatically mark a task as "Done" and inject resolution notes after pushing a fix to your codebase.
-- `compare_screenshots`: Trigger a visual regression check.
+- `compare_screenshots`: Compare screenshots before and after a fix.
 
 ---
 

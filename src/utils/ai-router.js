@@ -119,17 +119,18 @@ export async function callGroq(systemPrompt, userMessage, jsonMode = false) {
 // ── Gemini call ────────────────────────────────────────────────────────────────
 
 /**
- * Calls Gemini 2.5 Flash with the given prompt (single string).
+ * Calls Gemini with the given prompt (single string).
  * @param {string} prompt
  * @param {boolean} jsonMode
+ * @param {string} model - gemini-2.5-flash or gemini-2.5-pro
  * @returns {Promise<string>}
  */
-export async function callGemini(prompt, jsonMode = false) {
+export async function callGemini(prompt, jsonMode = false, model = 'gemini-2.5-flash') {
   if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY is not configured.');
 
   const config = jsonMode ? { responseMimeType: 'application/json' } : {};
   const response = await getGeminiClient().models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: model,
     contents: prompt,
     config
   });
@@ -146,68 +147,30 @@ export async function callGemini(prompt, jsonMode = false) {
 // ── Router ─────────────────────────────────────────────────────────────────────
 
 /**
- * Calls the preferred AI model with automatic fallback.
+ * Calls the preferred Gemini AI model. Groq is disabled.
  *
  * @param {object} options
- * @param {string} options.prompt          - Full prompt string. For Groq: used as the user message.
- * @param {string} [options.systemPrompt]  - System role prompt (prepended to Gemini prompt; used as system msg for Groq).
+ * @param {string} options.prompt          - Full prompt string.
+ * @param {string} [options.systemPrompt]  - System role prompt (prepended to Gemini prompt).
  * @param {boolean} [options.jsonMode]     - Request JSON-formatted output.
- * @param {'gemini'|'groq'|'auto'} [options.preferredModel='auto'] - Which model to prefer.
+ * @param {string} [options.model='gemini-2.5-flash'] - Specific Gemini model to use ('gemini-2.5-pro' or 'gemini-2.5-flash').
  * @returns {Promise<{ text: string, modelUsed: string }>}
  */
-export async function callAI({ prompt, systemPrompt = null, jsonMode = false, preferredModel = 'auto' }) {
-  const hasGemini = !!process.env.GEMINI_API_KEY;
-  const hasGroq   = !!process.env.GROQ_API_KEY;
-
-  // Build the ordered list of models to try
-  let order = [];
-
-  if (preferredModel === 'groq') {
-    order = ['groq', 'gemini'];
-  } else if (preferredModel === 'gemini') {
-    order = ['gemini', 'groq'];
-  } else {
-    // auto: prefer Gemini unless it's exhausted
-    order = quotaState.gemini.exhausted ? ['groq', 'gemini'] : ['gemini', 'groq'];
+export async function callAI({ prompt, systemPrompt = null, jsonMode = false, model = 'gemini-2.5-flash' }) {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY is not configured in .env');
   }
 
-  let lastError = null;
-
-  for (const model of order) {
-    if (model === 'gemini' && !hasGemini) continue;
-    if (model === 'groq'   && !hasGroq)   continue;
-    if (model === 'gemini' && quotaState.gemini.exhausted && preferredModel !== 'gemini') continue;
-    if (model === 'groq'   && quotaState.groq.exhausted   && preferredModel !== 'groq')   continue;
-
-    try {
-      if (model === 'gemini') {
-        const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
-        const text = await callGemini(fullPrompt, jsonMode);
-        return { text, modelUsed: 'gemini' };
-      } else {
-        const sys = systemPrompt || 'You are a helpful expert developer assistant.';
-        const text = await callGroq(sys, prompt, jsonMode);
-        return { text, modelUsed: 'groq' };
-      }
-    } catch (err) {
-      lastError = err;
-      if (isQuotaError(err)) {
-        if (model === 'gemini') {
-          console.error('[AI Router] Gemini quota exhausted, marking as unavailable. Trying Groq...');
-          quotaState.gemini.exhausted = true;
-          quotaState.gemini.resetAt = new Date(Date.now() + 60 * 60 * 1000);
-        } else {
-          console.error('[AI Router] Groq rate limit hit, marking as unavailable.');
-          quotaState.groq.exhausted = true;
-          quotaState.groq.resetAt = new Date(Date.now() + 60 * 60 * 1000);
-        }
-        // Try next model in the order
-        continue;
-      }
-      // Non-quota error: propagate immediately
-      throw err;
+  try {
+    const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+    const text = await callGemini(fullPrompt, jsonMode, model);
+    return { text, modelUsed: model };
+  } catch (err) {
+    if (isQuotaError(err)) {
+      console.error('[AI Router] Gemini quota exhausted, marking as unavailable.');
+      quotaState.gemini.exhausted = true;
+      quotaState.gemini.resetAt = new Date(Date.now() + 60 * 60 * 1000);
     }
+    throw err;
   }
-
-  throw lastError || new Error('No AI model available. Check your API keys and quotas in .env');
 }

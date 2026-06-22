@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import fs from 'fs';
 import path from 'path';
 import { chromium } from 'playwright';
@@ -10,6 +13,8 @@ import { normalizeFindings } from './src/normalize.js';
 import { annotateFindings } from './src/engines/visual-annotator.js';
 import { runMobileCheck } from './src/engines/mobile-ai-check.js';
 import { detectTechStack } from './src/utils/detector.js';
+import { matchFindingToPattern } from './src/utils/pattern-matcher.js';
+import { generatePdfReport } from './src/utils/pdf-generator.js';
 import chalk from 'chalk';
 import ora from 'ora';
 
@@ -19,9 +24,10 @@ async function main() {
   const projectArg = args.find(a => a.startsWith('--project='));
   const pageArg = args.find(a => a.startsWith('--page='));
   const categoriesArg = args.find(a => a.startsWith('--categories='));
+  const pdfArg = args.includes('--pdf');
 
   if (!url) {
-    console.error('Usage: node audit.js <url> [--project=id] [--page=id] [--categories=console,axe,lighthouse,links]');
+    console.error('Usage: node audit.js <url> [--project=id] [--page=id] [--categories=console,axe,lighthouse,links] [--pdf]');
     process.exit(1);
   }
 
@@ -136,17 +142,30 @@ async function main() {
     brokenLinks,
     mobileFindings
   });
-  normSpinner.succeed('Findings normalized and saved');
+  normSpinner.succeed('Findings normalized');
+
+  // Match findings to patterns before inserting
+  updateProgress('Matching findings to fix patterns...');
+  const matchSpinner = ora('Matching findings to fix patterns...').start();
+  const findingsWithPatterns = [];
+  for (const f of normalized) {
+    const patternKey = await matchFindingToPattern(f, db);
+    findingsWithPatterns.push({
+      ...f,
+      patternKey
+    });
+  }
+  matchSpinner.succeed('Findings matched to fix patterns');
 
   // Insert Findings
   const insertFinding = db.prepare(`
     INSERT INTO findings (
-      audit_id, page_id, category, severity, title, description, selector, source_url, source_tool, evidence_path, html_snippet, is_false_positive, notes, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      audit_id, page_id, category, severity, title, description, selector, source_url, source_tool, evidence_path, html_snippet, is_false_positive, notes, created_at, fix_pattern_key
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   db.transaction(() => {
-    for (const f of normalized) {
+    for (const f of findingsWithPatterns) {
       insertFinding.run(
         auditId,
         pageId, // Map to project page if provided
@@ -161,7 +180,8 @@ async function main() {
         f.html_snippet || null,
         f.is_false_positive || 0,
         f.notes || null,
-        new Date().toISOString()
+        new Date().toISOString(),
+        f.patternKey || null
       );
     }
   })();
@@ -192,6 +212,20 @@ async function main() {
   
   const reportPath = path.join(reportsDir, `audit-${timestamp}.json`);
   fs.writeFileSync(reportPath, JSON.stringify({ audit: auditReport, findings: findingsReport }, null, 2));
+
+  // Write PDF report if requested
+  if (pdfArg) {
+    updateProgress('Generating PDF Report...');
+    const pdfSpinner = ora('Generating PDF Report...').start();
+    const pdfPath = path.join(reportsDir, `audit-${timestamp}.pdf`);
+    try {
+      await generatePdfReport(auditId, db, pdfPath);
+      pdfSpinner.succeed(`PDF report generated: ${chalk.cyan(pdfPath)}`);
+    } catch (pdfErr) {
+      pdfSpinner.fail(`Failed to generate PDF: ${pdfErr.message}`);
+      console.error(pdfErr);
+    }
+  }
 
   // Console Summary
   const severityCounts = { critical: 0, serious: 0, moderate: 0, minor: 0 };
